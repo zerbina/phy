@@ -20,11 +20,17 @@ type
   Node       = TreeNode[NodeKind]
   NodeSeq    = seq[Node]
 
-  ProcInfo = object
+  EntityKind = enum
+    ekProc
+    ekLocal
+
+  Entity = object
+    kind: EntityKind
     id: int
-      ## ID of the procedure
-    result: SemType
-      ## return type
+      ## ID of the procedure or locals
+    typ: SemType
+      ## * for procedures, the return type
+      ## * for locals, the type
 
   ModuleCtx* = object
     ## The translation/analysis context for a single module.
@@ -39,7 +45,7 @@ type
     procs: Builder[NodeKind]
     numProcs: int
 
-    scope: Table[string, ProcInfo]
+    scope: Table[string, Entity]
       ## maps procedure names to their ID/position
 
     # procedure context:
@@ -370,7 +376,7 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
     let prc {.cursor.} = c.scope[name]
     if t.len(n) == 1:
       # procedure arity is currently always 0
-      case prc.result.kind
+      case prc.typ.kind
       of tkVoid:
         stmts.addStmt Call:
           bu.add Node(kind: Proc, val: prc.id.uint32)
@@ -379,7 +385,7 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
           discard
       of ComplexTypes:
         # the value is not returned normally, but passed via an out parameter
-        let tmp = c.newTemp(prc.result)
+        let tmp = c.newTemp(prc.typ)
         stmts.addStmt Drop:
           bu.subTree Call:
             bu.add Node(kind: Proc, val: prc.id.uint32)
@@ -392,7 +398,7 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
         bu.subTree Call:
           bu.add Node(kind: Proc, val: prc.id.uint32)
 
-      result = prc.result
+      result = prc.typ
     else:
       c.error("expected 0 arguments, but got " & $(t.len(n) - 1))
       bu.add Node(kind: IntVal)
@@ -411,15 +417,24 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     bu.add Node(kind: FloatVal, val: c.literals.pack(t.getFloat(n)))
     result = prim(tkFloat)
   of SourceKind.Ident:
-    case t.getString(n)
+    let name = t.getString(n)
+    case name
     of "false":
       bu.add Node(kind: IntVal, val: 0)
       result = prim(tkBool)
     of "true":
       bu.add Node(kind: IntVal, val: 1)
       result = prim(tkBool)
+    elif name in c.scope and c.scope[name].kind == ekLocal:
+      let ent {.cursor.} = c.scope[name]
+      if ent.typ.kind in ComplexTypes:
+        bu.add Node(kind: Local, val: ent.id.uint32)
+      else:
+        bu.subTree Copy:
+          bu.add Node(kind: Local, val: ent.id.uint32)
+      result = ent.typ
     else:
-      c.error("undeclared identifier: " & t.getString(n))
+      c.error("undeclared identifier: " & name)
       bu.add Node(kind: IntVal)
       result = prim(tkError)
   of SourceKind.Call:
@@ -624,7 +639,7 @@ proc declToIL*(c; t; n: NodeIndex): SemType =
       c.resetProcContext() # clear the context again
 
     # register the proc before analysing/translating the body
-    c.scope[name] = ProcInfo(id: c.numProcs, result: c.retType)
+    c.scope[name] = Entity(id: c.numProcs, typ: c.retType)
 
     let e = c.exprToIL(t, t.child(n, 3))
     # the body expression must always be a void expression
