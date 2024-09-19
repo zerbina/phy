@@ -189,20 +189,22 @@ proc colorGraph(gr: var Graph) =
       ## Used to prevent invalid color propagation
 
   # pre-color nodes pairs that are forced to share the same register:
-  for g in gr.groups.items:
+  # FIXME: still doesn't work for "splitting" renames
+  for i in countdown(gr.groups.high, 0):
+    let g = addr gr.groups[i]
     for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
       if e.noCopy:
-        if gr.nodes[e.src].color == 0:
-          gr.nodes[e.src] = (true, next)
+        if gr.nodes[e.dst].color == 0:
+          gr.nodes[e.dst] = (true, next)
           inc next
 
-        let color = gr.nodes[e.src].color
-        if gr.nodes[e.dst].color != color:
+        let color = gr.nodes[e.dst].color
+        if gr.nodes[e.src].color != color:
           # TODO: use proper error reporting
-          doAssert gr.nodes[e.dst].color == 0, "cannot satisfy constraints"
-          doAssert not containsOrIncl(markers[g.target], color),
+          doAssert gr.nodes[e.src].color == 0, "cannot satisfy constraints"
+          doAssert not containsOrIncl(markers[i], color),
                    "cannot satisfy constraints"
-          gr.nodes[e.dst] = (true, color)
+          gr.nodes[e.src] = (true, color)
 
   # assign unique colors to the rest:
   for n in gr.nodes.mitems:
