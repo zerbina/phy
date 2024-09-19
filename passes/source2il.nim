@@ -478,26 +478,82 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       tup = c.exprToIL(t, a)
     case tup.typ.kind
     of tkTuple:
-      let idx = t.getInt(b)
-      if idx >= 0 and idx < tup.typ.elems.len:
-        result = tup.typ.elems[idx]
+      if t[b].kind == SourceKind.IntVal:
+        # static indexing -> the type is known at compile time
+        let idx = t.getInt(b)
+        if idx >= 0 and idx < tup.typ.elems.len:
+          result = tup.typ.elems[idx]
 
-        case result.kind
-        of ComplexTypes:
-          bu.subTree Field:
-            bu.inline(tup, stmts)
-            bu.add Node(kind: Immediate, val: idx.uint32)
-        else:
-          # TODO: wrapping the expression in a Copy operation needs to happen
-          #       at the callsite (because only the consumer knows whether to
-          #       copy or not)
-          bu.subTree Copy:
+          case result.kind
+          of ComplexTypes:
             bu.subTree Field:
               bu.inline(tup, stmts)
               bu.add Node(kind: Immediate, val: idx.uint32)
+          else:
+            # TODO: wrapping the expression in a Copy operation needs to happen
+            #       at the callsite (because only the consumer knows whether to
+            #       copy or not)
+            bu.subTree Copy:
+              bu.subTree Field:
+                bu.inline(tup, stmts)
+                bu.add Node(kind: Immediate, val: idx.uint32)
+        else:
+          c.error("tuple has no element with index " & $idx)
+          result = errorType()
       else:
-        c.error("tuple has no element with index " & $idx)
-        result = errorType()
+        # dynamic indexing
+        let idx = c.exprToIL(t, t.child(n, 1))
+        let tmp = c.capture(tup, stmts)
+        let idxTmp = c.capture(idx, stmts)
+
+        let union = union(tup.typ.elems)
+        let res = c.newTemp(union)
+        var prev = buildTree Raise:
+          bu.add Node(kind: IntVal)
+        for i, it in tup.typ.elems.pairs:
+          let next = buildTree If:
+            bu.subTree Eq:
+              bu.add Node(kind: Type, val: c.typeToIL(idx.typ))
+              bu.subTree Copy:
+                bu.add idxTmp
+              bu.add Node(kind: IntVal, val: c.literals.pack(i))
+            bu.subTree Stmts:
+              let srcAcc = buildTree Copy:
+                bu.subTree Field:
+                  bu.add tmp
+                  bu.add Node(kind: Immediate, val: i.uint32)
+
+              if union.kind == tkUnion:
+                # set the tag:
+                bu.subTree Asgn:
+                  bu.subTree Field:
+                    bu.add Node(kind: Local, val: res)
+                    bu.add Node(kind: Immediate, val: 0)
+                  bu.add Node(kind: IntVal, val: c.literals.pack(find(union.elems, it)))
+                # set the union's value:
+                let dstAcc = buildTree Field:
+                  bu.subTree Field:
+                    bu.add Node(kind: Local, val: res)
+                    bu.add Node(kind: Immediate, val: 1)
+                  bu.add Node(kind: Immediate, val: find(union.elems, it).uint32)
+
+                c.genAsgn(dstAcc, srcAcc, it, bu)
+              else:
+                # XXX: for tuples of homogeneous type, using array lookup
+                #      would be much more efficient
+                c.genAsgn(@[Node(kind: Local, val: res)], srcAcc, it, bu)
+
+            if prev.len > 0:
+              bu.add prev
+          prev = next
+        stmts.add prev
+
+        result = union
+        if result.kind in ComplexTypes:
+          bu.add Node(kind: Local, val: res)
+        else:
+          bu.subTree Copy:
+            bu.add Node(kind: Local, val: res)
     of tkError:
       result = tup.typ
     else:
