@@ -1,0 +1,8 @@
+discard """
+  output: "200: int"
+"""
+(TupleAccess
+  (TupleCons (IntVal 100) (IntVal 200))
+  (Call (Ident "+")
+    (IntVal 1)
+    (IntVal 0)))

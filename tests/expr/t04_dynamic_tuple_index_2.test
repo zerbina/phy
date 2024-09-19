@@ -1,0 +1,8 @@
+discard """
+  output: "0.5: union(int, float)"
+"""
+(TupleAccess
+  (TupleCons (IntVal 100) (FloatVal 0.5))
+  (Call (Ident "+")
+    (IntVal 1)
+    (IntVal 0)))

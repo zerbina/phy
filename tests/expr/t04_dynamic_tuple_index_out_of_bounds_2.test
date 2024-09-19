@@ -1,0 +1,8 @@
+discard """
+  output: "unhandled exception: 0"
+"""
+(TupleAccess
+  (TupleCons (IntVal 100) (IntVal 200))
+  (Call (Ident "+")
+    (IntVal 2)
+    (IntVal 0)))
