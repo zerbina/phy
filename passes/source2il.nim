@@ -545,6 +545,91 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     bu.subTree Unreachable:
       discard
     result = prim(tkVoid)
+  of SourceKind.Match:
+    let e = c.exprToIL(t, t.child(n, 0))
+    var checked: seq[SemType]
+
+    let union = c.expectType(e.typ, tkUnion)
+    let val = c.capture(e, stmts)
+    let tag = c.newTemp(prim(tkInt))
+
+    stmts.addStmt Asgn:
+      bu.add Node(kind: Local, val: tag)
+      bu.subTree Copy:
+        bu.subTree Field:
+          bu.add val
+          bu.add Node(kind: Immediate, val: 0)
+
+    var branches: seq[(int, uint32, Expr)]
+    result = prim(tkVoid) # start with 'void' as the common type
+
+    for it in t.items(n, 1):
+      let (typPos, namePos, ex) = t.triplet(it)
+      let typ = c.evalType(t, typPos)
+
+      var idx = -1
+      if typ.kind != tkError:
+        if typ in checked:
+          c.error("duplicate matcher branch")
+        else:
+          checked.add typ
+
+        if union.kind != tkError:
+          idx = find(union.elems, typ)
+          if idx == -1:
+            c.error("type not part of the union")
+
+      let tmp = c.newTemp(typ)
+      let name = t.getString(namePos)
+      if name in c.scope:
+        c.error("redeclaration of " & name)
+
+      c.scope[name] = Entity(kind: ekLocal, id: tmp.int, typ: typ)
+      branches.add (idx, tmp, c.exprToIL(t, ex))
+      result = commonSupertype(result, branches[^1][2].typ)
+
+    if result.kind == tkError:
+      c.error("no common supertype")
+
+    if result.kind == tkVoid:
+      # no branch returns normally
+      bu.subTree Case:
+        bu.subTree Copy:
+          bu.add Node(kind: Local, val: tag)
+        for it in branches.items:
+          bu.subTree Choice:
+            bu.add Node(kind: IntVal, val: c.literals.pack(it[0]))
+            bu.subTree Stmts:
+              # TODO: initializing the variable is missing
+              for s in it[2].stmts.items:
+                bu.add s
+              bu.add it[2].expr
+
+    else:
+      let tmp = c.newTemp(result)
+      stmts.addStmt Case:
+        bu.add Node(kind: Type, val: c.typeToIL(prim(tkInt)))
+        bu.subTree Copy:
+          bu.add Node(kind: Local, val: tag)
+        for it in branches.items:
+          bu.subTree Choice:
+            bu.add Node(kind: IntVal, val: c.literals.pack(it[0]))
+            bu.subTree Stmts:
+              for s in it[2].stmts.items:
+                bu.add s
+
+              if it[2].typ.kind == tkVoid:
+                bu.add it[2].expr
+              else:
+                c.genAsgn(Node(kind: Local, val: tmp), it[2].expr, result, bu)
+
+      case result.kind
+      of ComplexTypes:
+        bu.add Node(kind: Local, val: tmp)
+      else:
+        bu.subTree Copy:
+          bu.add Node(kind: Local, val: tmp)
+
   of AllNodes - ExprNodes:
     unreachable()
 

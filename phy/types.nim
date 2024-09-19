@@ -99,6 +99,13 @@ proc union*(types: varargs[SemType]): SemType =
   else:
     result = SemType(kind: tkUnion, elems: elems)
 
+proc commonSupertype*(a, b: SemType): SemType =
+  # 'void' is the subtype of every other type
+  if a.kind == tkVoid:   b
+  elif b.kind == tkVoid: a
+  elif a == b:           a
+  else:                  prim(tkError)
+
 proc size*(t: SemType): int =
   ## Computes the size-in-bytes that an instance of `t` occupies in memory.
   case t.kind

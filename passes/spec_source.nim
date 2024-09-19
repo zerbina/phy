@@ -17,13 +17,14 @@ type
     TupleAccess
     Return
     Unreachable
+    Match, Destructure
     Params
     ProcDecl
     Module
 
 const
   ExprNodes* = {IntVal, FloatVal, Ident, Call, TupleCons, TupleAccess, Return,
-                Unreachable}
+                Match, Unreachable}
   DeclNodes* = {ProcDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 
