@@ -28,7 +28,7 @@ choice += (Choice <intVal> <single_stmt>)
 stmt += (Block <single_stmt>)
       | (Loop <single_stmt>)
       | (If <value> <single_stmt> <single_stmt>?)
-      | (Case <simple> <choice>+)
+      | (Case <type_id> <simple> <choice>+)
       | (Raise <value>)
       | (Unreachable)
 ```
